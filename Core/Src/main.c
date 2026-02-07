@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +32,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define KVALUEADDR 0x0A //the start address of the K value stored in the EEPROM
+#define RES2 820.0
+#define ECREF 200.0
+#define GDIFF (30/1.8)
+#define VR0  0.223
+#define G0  2
+#define I  (1.24 / 10000)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -95,6 +102,7 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   MX_USART1_UART_Init();
+
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -106,17 +114,29 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	  // Measurements
+	  // Temperature
+	  HAL_ADC_Start(&hadc1);
+	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+	  uint32_t adc0_val = HAL_ADC_GetValue(&hadc1);
+
+	  float voltage = adc0_val * 3.3 / 4096;
+	  float Rpt1000 = (voltage/GDIFF+VR0)/I/G0;
+	  temp = (Rpt1000-1000)/3.85;
+
+	  // UART frame with measurements
 	  char uart_frame[64];
 	  snprintf(uart_frame, sizeof(uart_frame),
 	           "MEAS,T=%.2f,EC=%.2f,pH=%.2f\r\n",
 	           temp, ec, ph);
-
+	  // Transmit UART frame
 	  HAL_UART_Transmit(&huart1,
 	                    (uint8_t*)uart_frame,
 	                    strlen(uart_frame),
 	                    HAL_MAX_DELAY);
 
-
+	  // Blink for test
 	  HAL_GPIO_TogglePin (GPIOC, GPIO_PIN_13);
 	  HAL_Delay (1000);
   }
@@ -208,7 +228,7 @@ static void MX_ADC1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN ADC1_Init 2 */
-
+  HAL_ADCEx_Calibration_Start(&hadc1);
   /* USER CODE END ADC1_Init 2 */
 
 }
