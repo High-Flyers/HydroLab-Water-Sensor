@@ -39,6 +39,8 @@
 #define VR0  0.223
 #define G0  2
 #define I  (1.24 / 10000)
+
+#define K_VAL 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,7 +54,7 @@ ADC_HandleTypeDef hadc1;
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
-
+ADC_ChannelConfTypeDef sConfig;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -117,13 +119,28 @@ int main(void)
 
 	  // Measurements
 	  // Temperature
+	  sConfig.Channel = ADC_CHANNEL_0;
+	  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
 	  HAL_ADC_Start(&hadc1);
 	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
 	  uint32_t adc0_val = HAL_ADC_GetValue(&hadc1);
 
-	  float voltage = adc0_val * 3.3 / 4096;
+	  float voltage = adc0_val * 3.3 / 4096.0;
 	  float Rpt1000 = (voltage/GDIFF+VR0)/I/G0;
 	  temp = (Rpt1000-1000)/3.85;
+
+	  // EC
+	  sConfig.Channel = ADC_CHANNEL_1;
+	  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
+	  HAL_ADC_Start(&hadc1);
+	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+	  uint32_t adc1_val = HAL_ADC_GetValue(&hadc1);
+
+	  voltage = adc1_val * 3.3 / 4096.0;
+	  float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * K_VAL;
+	  ec = ecvalueRaw / (1.0 + 0.02 * (temp - 25.0));
 
 	  // UART frame with measurements
 	  char uart_frame[64];
@@ -198,7 +215,7 @@ static void MX_ADC1_Init(void)
 
   /* USER CODE END ADC1_Init 0 */
 
-  ADC_ChannelConfTypeDef sConfig = {0};
+  //ADC_ChannelConfTypeDef sConfig = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
 
@@ -222,7 +239,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_55CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
