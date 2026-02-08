@@ -40,7 +40,7 @@
 #define G0  2
 #define I  (1.24 / 10000)
 
-#define K_VAL 1
+//#define K_VAL 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -68,6 +68,9 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+float k_val = 1.0;
+float reference = 1413.0;
+
 float temp = 0;
 float ec = 0;
 float ph = 0;
@@ -104,7 +107,6 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   MX_USART1_UART_Init();
-
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -116,7 +118,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-
 	  // Measurements
 	  // Temperature
 	  sConfig.Channel = ADC_CHANNEL_0;
@@ -139,8 +140,20 @@ int main(void)
 	  uint32_t adc1_val = HAL_ADC_GetValue(&hadc1);
 
 	  voltage = adc1_val * 3.3 / 4096.0;
-	  float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * K_VAL;
+	  float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * k_val;
 	  ec = ecvalueRaw / (1.0 + 0.02 * (temp - 25.0));
+
+	  // Calibration
+	  GPIO_PinState level_state;
+	  level_state = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
+	  uint8_t level = (level_state == GPIO_PIN_SET) ? 1 : 0;
+
+	  if (level == 0){
+	 		float k_new = RES2 * ECREF * reference / 100000.0f / voltage / 1000;
+	 		if (k_new >= 0.5 && k_new <= 1.5){
+	 			k_val = k_new;
+	 		}
+	  }
 
 	  // UART frame with measurements
 	  char uart_frame[64];
@@ -239,7 +252,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_55CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -298,6 +311,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
@@ -308,6 +322,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB12 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
