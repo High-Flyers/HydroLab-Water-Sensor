@@ -67,6 +67,7 @@ uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples);
 void Flash_Write_K(float k);
 float Flash_Read_K(void);
 float EC_reference_temperature(float temp);
+void ErrorBlink_Task(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -79,6 +80,8 @@ float reference = 1413.0;
 float temp = 0;
 float ec = 0;
 float ph = 0;
+
+volatile uint8_t error_flags = 0; // globalny licznik błędów
 /* USER CODE END 0 */
 
 /**
@@ -151,7 +154,10 @@ int main(void)
 
 	  voltage = adc1_val * 3.3 / 4096.0;
 	  float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * k_val;
-	  ec = ecvalueRaw / (1.0 + 0.02 * (temp - 25.0));
+	  if (!(error_flags & 0x01))
+		  ec = ecvalueRaw / (1.0 + 0.02 * (temp - 25.0));
+	  else
+		  ec = ecvalueRaw;
 
 	  // Calibration
 	  GPIO_PinState level_state;
@@ -183,7 +189,14 @@ int main(void)
 	                    HAL_MAX_DELAY);
 
 	  // Blink for test
-	  HAL_GPIO_TogglePin (GPIOC, GPIO_PIN_13);
+	  // ustawianie error_flags po pomiarach
+	  error_flags = 0;
+	  if(temp <= 0 || temp > 50) error_flags |= 0x01;
+	  if(ec <= 300 || ec > 20000) error_flags |= 0x02;
+	  if(ph <= 0 || ph > 14) error_flags |= 0x04;
+
+	  // task mrugania LED w tle
+	  ErrorBlink_Task();
 	  HAL_Delay (1000);
   }
   /* USER CODE END 3 */
@@ -420,6 +433,48 @@ float EC_reference_temperature(float temp){
     if(temp < T[0]) return EC[0];
     if(temp > T[9]) return EC[9];
     return EC[9]; // safety fallback
+}
+
+void ErrorBlink_Task(void){
+    static uint8_t state = 0;         // aktualny blink w sekwencji
+    static uint32_t last_tick = 0;
+    static uint32_t pause_until = 0;  // moment do rozpoczęcia nowej sekwencji
+
+    uint8_t blinks = 0;
+    if(error_flags & 0x01) blinks += 1; // temp
+    if(error_flags & 0x02) blinks += 2; // EC
+    if(error_flags & 0x04) blinks += 4; // pH
+
+    uint32_t now = HAL_GetTick();
+
+    // jeśli jesteśmy w przerwie, nic nie robimy
+    if(now < pause_until){
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+        return;
+    }
+
+    if(blinks == 0){
+        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // wyłącz LED
+        state = 0;  // reset sekwencji
+        return;
+    }
+
+    // szybkie mruganie co 100ms
+    if(now - last_tick >= 100){
+        last_tick = now;
+
+        if(state < blinks*2){ // *2 bo on+off
+            if(state % 2 == 0)
+                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
+            else
+                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
+            state++;
+        } else {
+            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // wyłącz LED po sekwencji
+            state = 0;
+            pause_until = now + 2500; // pauza 2,5 s przed kolejną sekwencją
+        }
+    }
 }
 /* USER CODE END 4 */
 
