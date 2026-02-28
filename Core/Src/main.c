@@ -40,6 +40,7 @@
 #define G0  2
 #define I  (1.24 / 10000)
 
+#define FLASH_K_ADDR 0x0800FC00
 //#define K_VAL 1
 /* USER CODE END PD */
 
@@ -62,6 +63,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART1_UART_Init(void);
+uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples);
+void Flash_Write_K(float k);
+float Flash_Read_K(void);
+float EC_reference_temperature(float temp);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -108,7 +113,11 @@ int main(void)
   MX_ADC1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  k_val = Flash_Read_K();
+  // Wyświetlenie odczytanej wartości K przy starcie
+  char uart_msg[64];
+  snprintf(uart_msg, sizeof(uart_msg), "K value at startup: %.4f\r\n", k_val);
+  HAL_UART_Transmit(&huart1, (uint8_t*)uart_msg, strlen(uart_msg), HAL_MAX_DELAY);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -119,13 +128,14 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  // Measurements
+
 	  // Temperature
 	  sConfig.Channel = ADC_CHANNEL_0;
 	  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
 
 	  HAL_ADC_Start(&hadc1);
 	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  uint32_t adc0_val = HAL_ADC_GetValue(&hadc1);
+	  uint32_t adc0_val = Read_ADC_Average(ADC_CHANNEL_0, 32);//HAL_ADC_GetValue(&hadc1);
 
 	  float voltage = adc0_val * 3.3 / 4096.0;
 	  float Rpt1000 = (voltage/GDIFF+VR0)/I/G0;
@@ -137,7 +147,7 @@ int main(void)
 
 	  HAL_ADC_Start(&hadc1);
 	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  uint32_t adc1_val = HAL_ADC_GetValue(&hadc1);
+	  uint32_t adc1_val = Read_ADC_Average(ADC_CHANNEL_1, 32); //HAL_ADC_GetValue(&hadc1);
 
 	  voltage = adc1_val * 3.3 / 4096.0;
 	  float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * k_val;
@@ -149,9 +159,15 @@ int main(void)
 	  uint8_t level = (level_state == GPIO_PIN_SET) ? 1 : 0;
 
 	  if (level == 0){
-	 		float k_new = RES2 * ECREF * reference / 100000.0f / voltage / 1000;
+		  	float ref_ec = EC_reference_temperature(temp);
+	 		float k_new = RES2 * ECREF * ref_ec/*reference*/ / 100000.0f / voltage / 1000;
 	 		if (k_new >= 0.5 && k_new <= 1.5){
 	 			k_val = k_new;
+	 			Flash_Write_K(k_val);
+	 			// Wyświetlenie nowej wartości K po zapisie
+	 			char uart_msg[64];
+	 			snprintf(uart_msg, sizeof(uart_msg), "New K saved: %.4f\r\n", k_val);
+	 			HAL_UART_Transmit(&huart1, (uint8_t*)uart_msg, strlen(uart_msg), HAL_MAX_DELAY);
 	 		}
 	  }
 
@@ -335,7 +351,76 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples)
+{
+    ADC_ChannelConfTypeDef sConfigLocal = {0};
+    sConfigLocal.Channel = channel;
+    sConfigLocal.Rank = ADC_REGULAR_RANK_1;
+    sConfigLocal.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
 
+    HAL_ADC_ConfigChannel(&hadc1, &sConfigLocal);
+
+    uint32_t sum = 0;
+
+    for(uint16_t i = 0; i < samples; i++)
+    {
+        HAL_ADC_Start(&hadc1);
+        HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+        sum += HAL_ADC_GetValue(&hadc1);
+        HAL_ADC_Stop(&hadc1);
+    }
+
+    return sum / samples;
+}
+
+void Flash_Write_K(float k)
+{
+    HAL_FLASH_Unlock();
+
+    FLASH_EraseInitTypeDef eraseInit;
+    uint32_t pageError;
+
+    eraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
+    eraseInit.PageAddress = FLASH_K_ADDR;
+    eraseInit.NbPages = 1;
+
+    HAL_FLASHEx_Erase(&eraseInit, &pageError);
+
+    uint32_t data;
+    memcpy(&data, &k, sizeof(float));
+
+    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_K_ADDR, data);
+
+    HAL_FLASH_Lock();
+}
+
+float Flash_Read_K(void)
+{
+    uint32_t data = *(uint32_t*)FLASH_K_ADDR;
+    float k;
+    memcpy(&k, &data, sizeof(float));
+
+    if (k < 0.5f || k > 1.5f)   // sanity check
+        k = 1.0f;
+
+    return k;
+}
+
+float EC_reference_temperature(float temp){
+    float T[] = {0,5,10,15,20,23,24,25,26,30};
+    float EC[] = {776,896,1020,1147,1278,1359,1386,1413,1440,1548};
+    int i;
+    for(i=0;i<9;i++){
+        if(temp >= T[i] && temp <= T[i+1]){
+            // liniowa interpolacja
+            float k = (temp - T[i]) / (T[i+1]-T[i]);
+            return EC[i] + k*(EC[i+1]-EC[i]);
+        }
+    }
+    if(temp < T[0]) return EC[0];
+    if(temp > T[9]) return EC[9];
+    return EC[9]; // safety fallback
+}
 /* USER CODE END 4 */
 
 /**
