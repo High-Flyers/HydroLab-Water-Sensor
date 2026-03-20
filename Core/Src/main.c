@@ -50,6 +50,7 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+// Musi byc globalnie bo zmieniamy kanal dynamicznie
 ADC_HandleTypeDef hadc1;
 
 UART_HandleTypeDef huart1;
@@ -68,15 +69,22 @@ void Flash_Write_K(float k);
 float Flash_Read_K(void);
 float EC_reference_temperature(float temp);
 void ErrorBlink_Task(void);
+float get_temperature();
+float get_EC();
+void calibrate();
+void send_measurements();
+void check_errors();
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+// stala K i referencja
 float k_val = 1.0;
 float reference = 1413.0;
 
+// Wartosci do odczytu (moze struktura?)
 float temp = 0;
 float ec = 0;
 float ph = 0;
@@ -133,31 +141,10 @@ int main(void)
 	  // Measurements
 
 	  // Temperature
-	  sConfig.Channel = ADC_CHANNEL_0;
-	  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
-	  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  uint32_t adc0_val = Read_ADC_Average(ADC_CHANNEL_0, 32);//HAL_ADC_GetValue(&hadc1);
-
-	  float voltage = adc0_val * 3.3 / 4096.0;
-	  float Rpt1000 = (voltage/GDIFF+VR0)/I/G0;
-	  temp = (Rpt1000-1000)/3.85;
+	  temp = get_temperature();
 
 	  // EC
-	  sConfig.Channel = ADC_CHANNEL_1;
-	  HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
-	  HAL_ADC_Start(&hadc1);
-	  HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	  uint32_t adc1_val = Read_ADC_Average(ADC_CHANNEL_1, 32); //HAL_ADC_GetValue(&hadc1);
-
-	  voltage = adc1_val * 3.3 / 4096.0;
-	  float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * k_val;
-	  if (!(error_flags & 0x01))
-		  ec = ecvalueRaw / (1.0 + 0.02 * (temp - 25.0));
-	  else
-		  ec = ecvalueRaw;
+	  ec = get_EC();
 
 	  // Calibration
 	  GPIO_PinState level_state;
@@ -165,37 +152,14 @@ int main(void)
 	  uint8_t level = (level_state == GPIO_PIN_SET) ? 1 : 0;
 
 	  if (level == 0){
-		  	float ref_ec = EC_reference_temperature(temp);
-	 		float k_new = RES2 * ECREF * ref_ec/*reference*/ / 100000.0f / voltage / 1000;
-	 		if (k_new >= 0.5 && k_new <= 1.5){
-	 			k_val = k_new;
-	 			Flash_Write_K(k_val);
-	 			// Wyświetlenie nowej wartości K po zapisie
-	 			char uart_msg[64];
-	 			snprintf(uart_msg, sizeof(uart_msg), "New K saved: %.4f\r\n", k_val);
-	 			HAL_UART_Transmit(&huart1, (uint8_t*)uart_msg, strlen(uart_msg), HAL_MAX_DELAY);
-	 		}
+		  	calibrate();
 	  }
 
 	  // UART frame with measurements
-	  char uart_frame[64];
-	  snprintf(uart_frame, sizeof(uart_frame),
-	           "MEAS,T=%.2f,EC=%.2f,pH=%.2f\r\n",
-	           temp, ec, ph);
-	  // Transmit UART frame
-	  HAL_UART_Transmit(&huart1,
-	                    (uint8_t*)uart_frame,
-	                    strlen(uart_frame),
-	                    HAL_MAX_DELAY);
-
-	  // Blink for test
-	  // ustawianie error_flags po pomiarach
-	  error_flags = 0;
-	  if(temp <= 0 || temp > 50) error_flags |= 0x01;
-	  if(ec <= 300 || ec > 20000) error_flags |= 0x02;
-	  if(ph <= 0 || ph > 14) error_flags |= 0x04;
+	  send_measurements();
 
 	  // task mrugania LED w tle
+	  check_errors();
 	  ErrorBlink_Task();
 	  HAL_Delay (1000);
   }
@@ -364,8 +328,11 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+// Usredniony odczyt z ADC (kanal, liczba probek do usrednienia)
 uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples)
 {
+	// Konfiguracja kanalu
     ADC_ChannelConfTypeDef sConfigLocal = {0};
     sConfigLocal.Channel = channel;
     sConfigLocal.Rank = ADC_REGULAR_RANK_1;
@@ -375,6 +342,7 @@ uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples)
 
     uint32_t sum = 0;
 
+    // Odczyt "n" razy i wyciagniecie sredniej
     for(uint16_t i = 0; i < samples; i++)
     {
         HAL_ADC_Start(&hadc1);
@@ -386,6 +354,7 @@ uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples)
     return sum / samples;
 }
 
+// Zapis na pamiec flash wartosci K do liczenia EC
 void Flash_Write_K(float k)
 {
     HAL_FLASH_Unlock();
@@ -407,6 +376,7 @@ void Flash_Write_K(float k)
     HAL_FLASH_Lock();
 }
 
+// Odczyt wartosci K przy starcie urzadzenia
 float Flash_Read_K(void)
 {
     uint32_t data = *(uint32_t*)FLASH_K_ADDR;
@@ -419,10 +389,12 @@ float Flash_Read_K(void)
     return k;
 }
 
+// Tablica referencyjnych wartosci EC probki do kalibracji w zaleznosci od temperatury
 float EC_reference_temperature(float temp){
     float T[] = {0,5,10,15,20,23,24,25,26,30};
     float EC[] = {776,896,1020,1147,1278,1359,1386,1413,1440,1548};
     int i;
+    // Poniewaz mamy tylko wartosci co 5 stopni robimy interpolacje dla innych temeparatur
     for(i=0;i<9;i++){
         if(temp >= T[i] && temp <= T[i+1]){
             // liniowa interpolacja
@@ -435,6 +407,7 @@ float EC_reference_temperature(float temp){
     return EC[9]; // safety fallback
 }
 
+// Task do mrugania dioda w przypadku errorow
 void ErrorBlink_Task(void){
     static uint8_t state = 0;         // aktualny blink w sekwencji
     static uint32_t last_tick = 0;
@@ -475,6 +448,83 @@ void ErrorBlink_Task(void){
             pause_until = now + 2500; // pauza 2,5 s przed kolejną sekwencją
         }
     }
+}
+
+// Pobierz temperature z kanalu 0
+float get_temperature(){
+	sConfig.Channel = ADC_CHANNEL_0;
+	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
+	HAL_ADC_Start(&hadc1);
+	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+	uint32_t adc0_val = Read_ADC_Average(ADC_CHANNEL_0, 32);//HAL_ADC_GetValue(&hadc1);
+
+	float voltage = adc0_val * 3.3 / 4096.0;
+	float Rpt1000 = (voltage/GDIFF+VR0)/I/G0;
+	return (Rpt1000-1000)/3.85;
+}
+
+// pobierz EC z kanalu 1
+float get_EC(){
+	sConfig.Channel = ADC_CHANNEL_1;
+	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
+	HAL_ADC_Start(&hadc1);
+	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+	uint32_t adc1_val = Read_ADC_Average(ADC_CHANNEL_1, 32); //HAL_ADC_GetValue(&hadc1);
+
+	float voltage = adc1_val * 3.3 / 4096.0;
+	float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * k_val;
+	if (!(error_flags & 0x01))
+		return ecvalueRaw / (1.0 + 0.02 * (temp - 25.0));
+	else
+		return ecvalueRaw;
+}
+
+// Kalibracja stalej K do odczytu EC i zapis jej na FLASHu
+void calibrate(){
+	float ref_ec = EC_reference_temperature(temp);
+
+	sConfig.Channel = ADC_CHANNEL_1;
+	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
+	HAL_ADC_Start(&hadc1);
+	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+	uint32_t adc1_val = Read_ADC_Average(ADC_CHANNEL_1, 32); //HAL_ADC_GetValue(&hadc1);
+
+	float voltage = adc1_val * 3.3 / 4096.0;
+
+	float k_new = RES2 * ECREF * ref_ec/*reference*/ / 100000.0f / voltage / 1000;
+	if (k_new >= 0.5 && k_new <= 1.5){
+		k_val = k_new;
+		Flash_Write_K(k_val);
+		// Wyświetlenie nowej wartości K po zapisie
+		char uart_msg[64];
+		snprintf(uart_msg, sizeof(uart_msg), "New K saved: %.4f\r\n", k_val);
+		HAL_UART_Transmit(&huart1, (uint8_t*)uart_msg, strlen(uart_msg), HAL_MAX_DELAY);
+	}
+}
+
+// Przesylanie pomiarow po UART
+void send_measurements(){
+	char uart_frame[64];
+	snprintf(uart_frame, sizeof(uart_frame),
+		     "MEAS,T=%.2f,EC=%.2f,pH=%.2f\r\n",
+		      temp, ec, ph);
+	// Transmit UART frame
+	HAL_UART_Transmit(&huart1,
+		              (uint8_t*)uart_frame,
+		              strlen(uart_frame),
+		              HAL_MAX_DELAY);
+}
+
+// Sprawdzenie errorow i ewentualne ustawienie flagi errora
+void check_errors(){
+	  // ustawianie error_flags po pomiarach
+	  error_flags = 0;
+	  if(temp <= 0 || temp > 50) error_flags |= 0x01;
+	  if(ec <= 300 || ec > 20000) error_flags |= 0x02;
+	  if(ph <= 0 || ph > 14) error_flags |= 0x04;
 }
 /* USER CODE END 4 */
 
