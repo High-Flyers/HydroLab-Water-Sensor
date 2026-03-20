@@ -57,6 +57,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define ext_temp_Pin GPIO_PIN_3
+#define ext_temp_GPIO_Port GPIOA
+#define EC_cal_Pin GPIO_PIN_12
+#define EC_cal_GPIO_Port GPIOB
+#define pH_cal_Pin GPIO_PIN_13
+#define pH_cal_GPIO_Port GPIOB
 
 /* USER CODE BEGIN Private defines */
 
