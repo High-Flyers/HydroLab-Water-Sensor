@@ -14,21 +14,22 @@ System zapisuje dane kalibracyjne w pamięci Flash, dzięki czemu nie są tracon
 
 ## Ramka UART
 Przykładowa ramka wysyłana co 1 sekundę:  
-MEAS,T=24.34,EC=1423.06,pH=0.00
+MEAS,T=24.34,EC=1423.06,pH=4.21
 
 - `T` – temperatura w °C  
 - `EC` – przewodność w µS/cm  
-- `pH` – obecnie zawsze 0.00  
+- `pH` – pH roztworu  
 
 ---
 ## Kalibracja
 
 ### Kalibracja EC
-- Przytrzymanie przycisku PB12 przelicza nową wartość `k_val` na podstawie referencyjnej przewodności EC w funkcji temperatury.  
-- Nowa wartość jest zapisywana w pamięci Flash.  
+Przytrzymanie przycisku `PB12` przelicza nową wartość `k_val` na podstawie referencyjnej przewodności EC w funkcji temperatury.  
+1. Klik → wejście w tryb kalibracji
+2. Klik → przeliczenie stałej `k_val` i zapisanie jej do pamięci flash.
 
-### 🧪 Kalibracja pH
-Kalibracja odbywa się jako 3-etapowy proces wykonany najpierw dla próbki 7 pH, a następnie 4 pH:
+### Kalibracja pH
+Kalibracja odbywa się za pomocą przycisku `PB13` jako 3-etapowy proces wykonany najpierw dla próbki 7 pH, a następnie 4 pH:
 
 1. Klik → wejście w tryb kalibracji  
 2. Klik → odczyt napięcia i rozpoznanie bufora:
@@ -41,15 +42,15 @@ Kalibracja odbywa się jako 3-etapowy proces wykonany najpierw dla próbki 7 pH,
 ## LED i błędy
 - LED na PC13 sygnalizuje błędy.  
 - Flagi błędów (`error_flags`):
-  - Bit 0 – temperatura poza zakresem (-50°C … 150°C lub równa 0)  
-  - Bit 1 – EC poza zakresem (≤0 lub >20000 µS/cm)  
+  - Bit 0 – temperatura poza zakresem (0°C … 50°C)  
+  - Bit 1 – EC poza zakresem (≤300 lub >20000 µS/cm)  
   - Bit 2 – pH poza zakresem (0 < pH ≤ 14)  
 - LED mruga co 100 ms, po sekwencji 2–3 s przerwy.  
 
 ---
 
 ## Pamięć Flash
-
+Dane kalibracyjne są zapisane na pamięć flash, aby zachować je po restarcie urządzenia. Dane do sondy przewodności znajdują się na innym sektorze flash (1kB) niż dane z sondy pH.
 | Parametr | Adres |
 |---------|------|
 | K (EC) | 0x0800FC00 |
@@ -68,7 +69,7 @@ Kalibracja odbywa się jako 3-etapowy proces wykonany najpierw dla próbki 7 pH,
 | PA0    | ADC_CHANNEL_0 | Czujnik temperatury     |
 | PA1    | ADC_CHANNEL_1 | Czujnik EC              |
 | PA2    | ADC_CHANNEL_2 | Czujnik pH              |
-| PA9    | USART1_TX   | UART – transmisja do PC    |
+| PA9    | USART1_TX   | UART – transmisja    |
 | PA10   | USART1_RX   | UART – odbiór              |
 
 ---
@@ -86,8 +87,8 @@ Kalibracja odbywa się jako 3-etapowy proces wykonany najpierw dla próbki 7 pH,
 ## Uwagi dotyczące sondy pH 
 - Nie dopuścić do wyschnięcia sondy  
 - Przechowywać w:
-  - roztworze KCl (zalecane)  
-  - lub buforze pH  
+  - roztworze KCl  
+  - lub buforze pH 4
   - lub wodzie z niewielką ilością soli (awaryjnie)  
 - Nie dotykać szklanej końcówki  
 - Utrzymywać złącze BNC suche i czyste  

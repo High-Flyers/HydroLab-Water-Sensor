@@ -21,8 +21,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <string.h>
-#include <stdio.h>
+#include "flash.h"
+#include "sensors.h"
+#include "calibration.h"
+#include "error_handler.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -32,17 +34,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define KVALUEADDR 0x0A //the start address of the K value stored in the EEPROM
-#define RES2 820.0
-#define ECREF 200.0
-#define GDIFF (30/1.8)
-#define VR0  0.223
-#define G0  2
-#define I  (1.24 / 10000)
 
-#define FLASH_PH_ADDR  0x0800F800
-#define FLASH_K_ADDR 0x0800FC00
-//#define K_VAL 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -65,49 +57,11 @@ static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples);
-void Flash_Write_K(float k);
-float Flash_Read_K(void);
-float EC_reference_temperature(float temp);
-void ErrorBlink_Task(void);
-float get_temperature();
-float get_EC();
-float get_pH();
-void calibrate();
-uint8_t pH_button_pressed(void);
-void pH_calibration_task(void);
-void Flash_Write_PH(float neutral, float acid);
-void Flash_Read_PH(void);
-void send_measurements();
-void check_errors();
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-// stala K i referencja - EC
-float k_val = 1.0;
-float reference = 1413.0;
-
-// stale dla pH
-float acidVoltage = 2032.44;
-float neutralVoltage = 1500.0;
-
-typedef enum {
-    PH_CAL_IDLE = 0,
-    PH_CAL_ENTER,
-    PH_CAL_CAL,
-    PH_CAL_EXIT
-} PhCalState;
-
-static PhCalState ph_cal_state = PH_CAL_IDLE;
-static uint8_t    ph_cal_finish = 0;
-
-// Wartosci do odczytu (moze struktura?)
-float temp = 0;
-float ec = 0;
-float ph = 0;
-
-volatile uint8_t error_flags = 0; // globalny licznik błędów
 /* USER CODE END 0 */
 
 /**
@@ -142,15 +96,10 @@ int main(void)
   MX_ADC1_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  k_val = Flash_Read_K();
-  Flash_Read_PH();
-  // Wyświetlenie odczytanej wartości K przy starcie
-  char uart_msg[64];
-  snprintf(uart_msg, sizeof(uart_msg), "K value at startup: %.4f\r\n", k_val);
-  HAL_UART_Transmit(&huart1, (uint8_t*)uart_msg, strlen(uart_msg), HAL_MAX_DELAY);
-
-  snprintf(uart_msg, sizeof(uart_msg), "neutral val: %.4f acid val: %.4f\r\n", neutralVoltage, acidVoltage);
-  HAL_UART_Transmit(&huart1, (uint8_t*)uart_msg, strlen(uart_msg), HAL_MAX_DELAY);
+  // Odczyt wartosci K - dla EC
+  Flash_Read_K(&k_val, &huart1);
+  // Odczyt 2 pkt 4pH i 7pH
+  Flash_Read_PH(&neutralVoltage, &acidVoltage, &huart1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -160,37 +109,42 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+
+	  uint32_t now = HAL_GetTick();
+
+	  // task mrugania LED w tle
+	  static uint32_t last_blink = 0;
+	  if (now - last_blink >= 100)
+	  {
+		 ErrorBlink_Task();
+
+		 last_blink = now;
+	  }
+
 	  // Measurements
+	  static uint32_t last_meas = 0;
+	  if (now - last_meas >= 1000) {
+		  // Temperature
+		  temp = get_temperature(&hadc1);
+		  // EC
+		  ec = get_EC(&hadc1);
+		  // pH
+		  ph = get_pH(&hadc1);
+		  // UART frame with measurements
+		  send_measurements(&huart1);
+		  // Sprawdz errory
+		  check_errors();
 
-	  // Temperature
-	  temp = get_temperature();
-
-	  // EC
-	  ec = get_EC();
-
-	  // pH
-	  ph = get_pH();
+		  last_meas = now;
+	  }
 
 	  // Calibration
 	  // Kalibracja EC
-	  GPIO_PinState level_state;
-	  level_state = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12);
-	  uint8_t level = (level_state == GPIO_PIN_SET) ? 1 : 0;
-
+	  EC_calibration_task(&hadc1, &huart1);
 	  // Kalibracja PH
-	  pH_calibration_task();
+	  pH_calibration_task(&hadc1, &huart1);
 
-	  if (level == 0){
-		  	calibrate();
-	  }
-
-	  // UART frame with measurements
-	  send_measurements();
-
-	  // task mrugania LED w tle
-	  check_errors();
-	  ErrorBlink_Task();
-	  HAL_Delay (1000);
+	  HAL_Delay (100);
   }
   /* USER CODE END 3 */
 }
@@ -364,358 +318,6 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-// Usredniony odczyt z ADC (kanal, liczba probek do usrednienia)
-uint32_t Read_ADC_Average(uint32_t channel, uint16_t samples)
-{
-	// Konfiguracja kanalu
-    ADC_ChannelConfTypeDef sConfigLocal = {0};
-    sConfigLocal.Channel = channel;
-    sConfigLocal.Rank = ADC_REGULAR_RANK_1;
-    sConfigLocal.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
-
-    HAL_ADC_ConfigChannel(&hadc1, &sConfigLocal);
-
-    uint32_t sum = 0;
-
-    // Odczyt "n" razy i wyciagniecie sredniej
-    for(uint16_t i = 0; i < samples; i++)
-    {
-        HAL_ADC_Start(&hadc1);
-        HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-        sum += HAL_ADC_GetValue(&hadc1);
-        HAL_ADC_Stop(&hadc1);
-    }
-
-    return sum / samples;
-}
-
-// Zapis na pamiec flash wartosci K do liczenia EC
-void Flash_Write_K(float k)
-{
-    HAL_FLASH_Unlock();
-
-    FLASH_EraseInitTypeDef eraseInit;
-    uint32_t pageError;
-
-    eraseInit.TypeErase = FLASH_TYPEERASE_PAGES;
-    eraseInit.PageAddress = FLASH_K_ADDR;
-    eraseInit.NbPages = 1;
-
-    HAL_FLASHEx_Erase(&eraseInit, &pageError);
-
-    uint32_t data;
-    memcpy(&data, &k, sizeof(float));
-
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_K_ADDR, data);
-
-    HAL_FLASH_Lock();
-}
-
-// Odczyt wartosci K przy starcie urzadzenia
-float Flash_Read_K(void)
-{
-    uint32_t data = *(uint32_t*)FLASH_K_ADDR;
-    float k;
-    memcpy(&k, &data, sizeof(float));
-
-    if (k < 0.5f || k > 1.5f)   // sanity check
-        k = 1.0f;
-
-    return k;
-}
-
-// Tablica referencyjnych wartosci EC probki do kalibracji w zaleznosci od temperatury
-float EC_reference_temperature(float temp){
-    float T[] = {0,5,10,15,20,23,24,25,26,30};
-    float EC[] = {776,896,1020,1147,1278,1359,1386,1413,1440,1548};
-    int i;
-    // Poniewaz mamy tylko wartosci co 5 stopni robimy interpolacje dla innych temeparatur
-    for(i=0;i<9;i++){
-        if(temp >= T[i] && temp <= T[i+1]){
-            // liniowa interpolacja
-            float k = (temp - T[i]) / (T[i+1]-T[i]);
-            return EC[i] + k*(EC[i+1]-EC[i]);
-        }
-    }
-    if(temp < T[0]) return EC[0];
-    if(temp > T[9]) return EC[9];
-    return EC[9]; // safety fallback
-}
-
-// Task do mrugania dioda w przypadku errorow
-void ErrorBlink_Task(void){
-    static uint8_t state = 0;         // aktualny blink w sekwencji
-    static uint32_t last_tick = 0;
-    static uint32_t pause_until = 0;  // moment do rozpoczęcia nowej sekwencji
-
-    uint8_t blinks = 0;
-    if(error_flags & 0x01) blinks += 1; // temp
-    if(error_flags & 0x02) blinks += 2; // EC
-    if(error_flags & 0x04) blinks += 4; // pH
-
-    uint32_t now = HAL_GetTick();
-
-    // jeśli jesteśmy w przerwie, nic nie robimy
-    if(now < pause_until){
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-        return;
-    }
-
-    if(blinks == 0){
-        HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // wyłącz LED
-        state = 0;  // reset sekwencji
-        return;
-    }
-
-    // szybkie mruganie co 100ms
-    if(now - last_tick >= 100){
-        last_tick = now;
-
-        if(state < blinks*2){ // *2 bo on+off
-            if(state % 2 == 0)
-                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
-            else
-                HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
-            state++;
-        } else {
-            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // wyłącz LED po sekwencji
-            state = 0;
-            pause_until = now + 2500; // pauza 2,5 s przed kolejną sekwencją
-        }
-    }
-}
-
-// Pobierz temperature z kanalu 0
-float get_temperature(){
-	sConfig.Channel = ADC_CHANNEL_0;
-	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
-	HAL_ADC_Start(&hadc1);
-	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	uint32_t adc0_val = Read_ADC_Average(ADC_CHANNEL_0, 32);//HAL_ADC_GetValue(&hadc1);
-
-	float voltage = adc0_val * 3.3 / 4096.0;
-	float Rpt1000 = (voltage/GDIFF+VR0)/I/G0;
-	return (Rpt1000-1000)/3.85;
-}
-
-// pobierz EC z kanalu 1
-float get_EC(){
-	sConfig.Channel = ADC_CHANNEL_1;
-	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
-	HAL_ADC_Start(&hadc1);
-	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	uint32_t adc1_val = Read_ADC_Average(ADC_CHANNEL_1, 32); //HAL_ADC_GetValue(&hadc1);
-
-	float voltage = adc1_val * 3.3 / 4096.0;
-	float ecvalueRaw = 1000 * 100000 * voltage / RES2 / ECREF * k_val;
-	// w razie jakby nie bylo temperatury
-	if (!(error_flags & 0x01))
-		return ecvalueRaw / (1.0 + 0.02 * (temp - 25.0));
-	else
-		return ecvalueRaw;
-}
-
-float get_pH(){
-	sConfig.Channel = ADC_CHANNEL_2;
-	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
-	HAL_ADC_Start(&hadc1);
-	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	uint32_t adc2_val = Read_ADC_Average(ADC_CHANNEL_2, 32); //HAL_ADC_GetValue(&hadc1);
-
-	float voltage_mv = adc2_val * 3300.0f / 4096.0f;  // w mV
-
-	// Korekcja Nernsta względem temperatury (domyślnie 25°C jeśli błąd temp)
-	float t = (error_flags & 0x01) ? 25.0f : temp;
-	float nernst = (0.05916f * (273.15f + t) / 298.15f) * 1000.0f;  // mV/pH
-
-	float slope     = (7.0f - 4.0f) / ((neutralVoltage - 1500.0f) / nernst
-	                                      - (acidVoltage    - 1500.0f) / nernst);
-	float intercept = 7.0f - slope * (neutralVoltage - 1500.0f) / nernst;
-
-	return slope * (voltage_mv - 1500.0f) / nernst + intercept;
-}
-
-// Kalibracja stalej K do odczytu EC i zapis jej na FLASHu
-void calibrate(){
-	float ref_ec = EC_reference_temperature(temp);
-
-	sConfig.Channel = ADC_CHANNEL_1;
-	HAL_ADC_ConfigChannel(&hadc1, &sConfig);
-
-	HAL_ADC_Start(&hadc1);
-	HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	uint32_t adc1_val = Read_ADC_Average(ADC_CHANNEL_1, 32); //HAL_ADC_GetValue(&hadc1);
-
-	float voltage = adc1_val * 3.3 / 4096.0;
-
-	float k_new = RES2 * ECREF * ref_ec/*reference*/ / 100000.0f / voltage / 1000;
-	if (k_new >= 0.5 && k_new <= 1.5){
-		k_val = k_new;
-		Flash_Write_K(k_val);
-		// Wyświetlenie nowej wartości K po zapisie
-		char uart_msg[64];
-		snprintf(uart_msg, sizeof(uart_msg), "New K saved: %.4f\r\n", k_val);
-		HAL_UART_Transmit(&huart1, (uint8_t*)uart_msg, strlen(uart_msg), HAL_MAX_DELAY);
-	}
-}
-
-// Pomocnicza: wykrywa pojedyncze wciśnięcie przycisku (zbocze + debounce)
-uint8_t pH_button_pressed(void)
-{
-    static uint8_t  last_btn     = 1;
-    static uint8_t  btn_handled  = 0;
-    static uint32_t debounce_tick = 0;
-
-    uint8_t btn = HAL_GPIO_ReadPin(GPIOB, pH_cal_Pin); // pull-up: wciśnięty = 0
-    uint32_t now = HAL_GetTick();
-
-    if (btn != last_btn) {
-        debounce_tick = now;   // reset debounce przy każdej zmianie
-    }
-    last_btn = btn;
-
-    if ((now - debounce_tick) < 50) return 0;  // jeszcze bouncing
-
-    if (btn == 0 && !btn_handled) {
-        btn_handled = 1;
-        return 1;   // świeże wciśnięcie!
-    }
-    if (btn == 1) {
-        btn_handled = 0;  // zwolniony, gotowy na następny
-    }
-    return 0;
-}
-
-// Główna state machine kalibracji pH
-void pH_calibration_task(void)
-{
-    if (!pH_button_pressed()) return;  // nic do roboty
-
-    char msg[64];
-
-    switch (ph_cal_state)
-    {
-        // --- IDLE: pierwsze kliknięcie wchodzi w tryb kalibracji ---
-        case PH_CAL_IDLE:
-            ph_cal_finish = 0;
-            ph_cal_state  = PH_CAL_ENTER;
-            snprintf(msg, sizeof(msg), "CAL_PH: Enter mode. Put probe in 4.0 or 7.0 buffer.\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-            break;
-
-        // --- ENTER: drugie kliknięcie = sprawdź napięcie i zapamiętaj ---
-        case PH_CAL_ENTER:
-        {
-            // Odczyt aktualnego napięcia pH (mV)
-            uint32_t adc_val = Read_ADC_Average(ADC_CHANNEL_2, 32);
-            float voltage_mv = adc_val * 3300.0f / 4096.0f;  // w mV
-
-            if (voltage_mv > 1322.0f && voltage_mv < 1678.0f) {
-                neutralVoltage = voltage_mv;
-                ph_cal_finish  = 1;
-                snprintf(msg, sizeof(msg), "CAL_PH: Buffer 7.0 OK (%.1f mV). Click to save.\r\n", voltage_mv);
-            } else if (voltage_mv > 1854.0f && voltage_mv < 2210.0f) {
-                acidVoltage   = voltage_mv;
-                ph_cal_finish = 1;
-                snprintf(msg, sizeof(msg), "CAL_PH: Buffer 4.0 OK (%.1f mV). Click to save.\r\n", voltage_mv);
-            } else {
-                ph_cal_finish = 0;
-                snprintf(msg, sizeof(msg), "CAL_PH: ERROR - bad voltage (%.1f mV). Try again.\r\n", voltage_mv);
-            }
-
-            HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-            ph_cal_state = PH_CAL_CAL;
-            break;
-        }
-
-        // --- CAL: trzecie kliknięcie = zapisz lub zgłoś błąd ---
-        case PH_CAL_CAL:
-            if (ph_cal_finish) {
-            	Flash_Write_PH(neutralVoltage, acidVoltage);
-                snprintf(msg, sizeof(msg), "CAL_PH: Calibration saved! Exit.\r\n");
-            } else {
-                snprintf(msg, sizeof(msg), "CAL_PH: Calibration FAILED. Exit.\r\n");
-            }
-            HAL_UART_Transmit(&huart1, (uint8_t*)msg, strlen(msg), HAL_MAX_DELAY);
-            ph_cal_state = PH_CAL_IDLE;  // wróć do IDLE
-            ph_cal_finish = 0;
-            break;
-
-        default:
-            ph_cal_state = PH_CAL_IDLE;
-            break;
-    }
-}
-
-// Zapis neutral i acid voltage do flasha
-void Flash_Write_PH(float neutral, float acid)
-{
-    HAL_FLASH_Unlock();
-
-    FLASH_EraseInitTypeDef eraseInit;
-    uint32_t pageError;
-
-    eraseInit.TypeErase   = FLASH_TYPEERASE_PAGES;
-    eraseInit.PageAddress = FLASH_PH_ADDR;
-    eraseInit.NbPages     = 1;
-    HAL_FLASHEx_Erase(&eraseInit, &pageError);
-
-    uint32_t data;
-
-    memcpy(&data, &neutral, sizeof(float));
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_PH_ADDR,     data);
-
-    memcpy(&data, &acid, sizeof(float));
-    HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, FLASH_PH_ADDR + 4, data);
-
-    HAL_FLASH_Lock();
-}
-
-// Odczyt na starcie wartosci neutral i acid volt
-void Flash_Read_PH(void)
-{
-    uint32_t data;
-    float val;
-
-    data = *(uint32_t*)FLASH_PH_ADDR;
-    memcpy(&val, &data, sizeof(float));
-    if (val >= 1322.0f && val <= 1678.0f)
-        neutralVoltage = val;
-    else
-        neutralVoltage = 1500.0f;  // domyślna
-
-    data = *(uint32_t*)(FLASH_PH_ADDR + 4);
-    memcpy(&val, &data, sizeof(float));
-    if (val >= 1854.0f && val <= 2210.0f)
-        acidVoltage = val;
-    else
-        acidVoltage = 2032.44f;  // domyślna
-}
-
-// Przesylanie pomiarow po UART
-void send_measurements(){
-	char uart_frame[64];
-	snprintf(uart_frame, sizeof(uart_frame),
-		     "MEAS,T=%.2f,EC=%.2f,pH=%.2f\r\n",
-		      temp, ec, ph);
-	// Transmit UART frame
-	HAL_UART_Transmit(&huart1,
-		              (uint8_t*)uart_frame,
-		              strlen(uart_frame),
-		              HAL_MAX_DELAY);
-}
-
-// Sprawdzenie errorow i ewentualne ustawienie flagi errora
-void check_errors(){
-	  // ustawianie error_flags po pomiarach
-	  error_flags = 0;
-	  if(temp <= 0 || temp > 50) error_flags |= 0x01;
-	  if(ec <= 300 || ec > 20000) error_flags |= 0x02;
-	  if(ph <= 0 || ph > 14) error_flags |= 0x04;
-}
 /* USER CODE END 4 */
 
 /**
