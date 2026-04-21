@@ -1,8 +1,8 @@
 # STM32CubeIDE / Eclipse
 .metadata/
 .settings/
-.project
-.cproject
+#.project
+#.cproject
 .launches/
 
 # Build output
