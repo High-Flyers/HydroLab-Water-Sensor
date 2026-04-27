@@ -52,10 +52,10 @@ Kalibracja odbywa się za pomocą przycisku `PB13` jako 3-etapowy proces wykonan
 ## LED i błędy
 - LED na PC13 sygnalizuje błędy.  
 - Flagi błędów (`error_flags`):
-  - Bit 0 – temperatura poza zakresem (0°C … 50°C)  
-  - Bit 1 – EC poza zakresem (≤300 lub >20000 µS/cm)  
-  - Bit 2 – pH poza zakresem (0 < pH ≤ 14)  
-- LED mruga co 100 ms, po sekwencji 2–3 s przerwy.  
+  - 1 blink – temperatura poza zakresem (0°C … 50°C)  
+  - 2 blinki – EC poza zakresem (≤300 lub >20000 µS/cm)  
+  - 4 blinki – pH poza zakresem (0 < pH ≤ 14)  
+- LED mruga co 100 ms, po sekwencji 2–3 s przerwy, a błędy sie sumują.
 
 ---
 
