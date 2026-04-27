@@ -60,6 +60,10 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define ext_temp_Pin GPIO_PIN_3
 #define ext_temp_GPIO_Port GPIOA
+#define MOTOR_FB_Pin GPIO_PIN_0
+#define MOTOR_FB_GPIO_Port GPIOB
+#define MOTOR_CMD_Pin GPIO_PIN_1
+#define MOTOR_CMD_GPIO_Port GPIOB
 #define EC_cal_Pin GPIO_PIN_12
 #define EC_cal_GPIO_Port GPIOB
 #define pH_cal_Pin GPIO_PIN_13

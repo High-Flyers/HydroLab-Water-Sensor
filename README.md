@@ -11,8 +11,18 @@ Prosty system pomiarowy oparty na STM32:
 System zapisuje dane kalibracyjne w pamięci Flash, dzięki czemu nie są tracone po restarcie.
 
 ---
+## Komunikacja poprzez UART
 
-## Ramka UART
+### Sterowanie silnikiem 
+Komendy:
+- `take` - wysłanie polecenia do pobrania próbki wody
+- `release` - wysłanie polecenia do zrzutu pobranej wody
+
+Po zakończonej operacji żądanej komendą, wysyłana jest informacja zwrotna:
+- `ready` - zakończono pobór, zrzut próbki wody 
+- `error` - nie otrzymano informacji zwrotnej (timeout 5 - 10 s) lub otrzymano błędny sygnał od kontrolera silnika (malformed)
+
+### Ramka UART z pomiarami
 Przykładowa ramka wysyłana co 1 sekundę:  
 MEAS,T=24.34,EC=1423.06,pH=4.21
 
@@ -71,6 +81,8 @@ Dane kalibracyjne są zapisane na pamięć flash, aby zachować je po restarcie 
 | PA2    | ADC_CHANNEL_2 | Czujnik pH              |
 | PA9    | USART1_TX   | UART – transmisja    |
 | PA10   | USART1_RX   | UART – odbiór              |
+| PB0   | MOTOR_FB   | Sygnał zwrotny z kontrolera silnika       |
+| PB1   | MOTOR_CMD   | Komenda do kontrolera silnika         |
 
 ---
 
@@ -81,7 +93,7 @@ Dane kalibracyjne są zapisane na pamięć flash, aby zachować je po restarcie 
 4. Przycisk EC → PB12 do GND  
 5. Przycisk pH → PB13 do GND  
 6. UART → PA9 (TX), PA10 (RX)
-   
+7. MOTOR_FB → PB0, MOTOR_CMD → PB1
 ---
 
 ## Uwagi dotyczące sondy pH 

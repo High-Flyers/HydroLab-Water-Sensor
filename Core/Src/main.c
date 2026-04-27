@@ -100,6 +100,8 @@ int main(void)
   Flash_Read_K(&k_val, &huart1);
   // Odczyt 2 pkt 4pH i 7pH
   Flash_Read_PH(&neutralVoltage, &acidVoltage, &huart1);
+  // Uart takze do odczytywania komend
+  UartCmd_Init(&huart1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -292,6 +294,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : PC13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -304,6 +309,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(ext_temp_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MOTOR_FB_Pin */
+  GPIO_InitStruct.Pin = MOTOR_FB_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(MOTOR_FB_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MOTOR_CMD_Pin */
+  GPIO_InitStruct.Pin = MOTOR_CMD_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(MOTOR_CMD_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : EC_cal_Pin pH_cal_Pin */
   GPIO_InitStruct.Pin = EC_cal_Pin|pH_cal_Pin;
