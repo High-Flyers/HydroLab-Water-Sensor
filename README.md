@@ -19,8 +19,12 @@ Komendy:
 - `release` - wysłanie polecenia do zrzutu pobranej wody
 
 Po zakończonej operacji żądanej komendą, wysyłana jest informacja zwrotna:
-- `ready` - zakończono pobór, zrzut próbki wody 
+- `ready` - zakończono pobór / zrzut próbki wody 
 - `error` - nie otrzymano informacji zwrotnej (timeout 5 - 10 s) lub otrzymano błędny sygnał od kontrolera silnika (malformed)
+
+Sterowanie silnikiem odbywa się w sposób:
+- `take` - MOTOR_CMD LOW->HIGH, oczekiwanie na MOTOR_FB = HIGH
+- `release` - MOTOR_CMD HIGH->LOW, oczekiwanie na MOTOR_FB = LOW
 
 ### Ramka UART z pomiarami
 Przykładowa ramka wysyłana co 1 sekundę:  
@@ -29,6 +33,11 @@ MEAS,T=24.34,EC=1423.06,pH=4.21
 - `T` – temperatura w °C  
 - `EC` – przewodność w µS/cm  
 - `pH` – pH roztworu  
+
+### Powłkowa systemowa
+Dodatkowo można wykorzystać komendy:
+- `meas on/off` - włączenie lub wyłączenie przesyłania ramki z pomiarami
+- `reset` - reset mikrokontrolera
 
 ---
 ## Kalibracja

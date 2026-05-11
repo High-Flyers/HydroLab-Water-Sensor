@@ -25,6 +25,7 @@
 #include "sensors.h"
 #include "calibration.h"
 #include "error_handler.h"
+#include "uart_cmd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -133,7 +134,8 @@ int main(void)
 		  // pH
 		  ph = get_pH(&hadc1);
 		  // UART frame with measurements
-		  send_measurements(&huart1);
+		  if (UartCmd_MeasEnabled())
+			  send_measurements(&huart1);
 		  // Sprawdz errory
 		  check_errors();
 
@@ -145,6 +147,9 @@ int main(void)
 	  EC_calibration_task(&hadc1, &huart1);
 	  // Kalibracja PH
 	  pH_calibration_task(&hadc1, &huart1);
+
+	  // Odczyt komend z Uarta
+	  UartCmd_Task();
 
 	  HAL_Delay (100);
   }

@@ -2,6 +2,7 @@
 #include <string.h>
 
 #define RX_BUF_SIZE 32
+#define MOTOR_TIMEOUT_MS 10000
 
 static UART_HandleTypeDef *_huart;
 static uint8_t rx_byte;
@@ -9,6 +10,7 @@ static char rx_buf[RX_BUF_SIZE];
 static uint8_t rx_idx = 0;
 static uint8_t cmd_ready = 0;
 static char cmd_buf[RX_BUF_SIZE];
+static uint8_t meas_enabled = 1;
 
 void UartCmd_Init(UART_HandleTypeDef *huart)
 {
@@ -62,6 +64,14 @@ void UartCmd_Task(void)
     {
         UartCmd_OnRelease();
     }
+    else if (strcmp(cmd_buf, "reset") == 0)
+    {
+        UartCmd_OnReset();
+    }
+    else if (strncmp(cmd_buf, "meas", 4) == 0)
+    {
+    	UartCmd_OnMeas();
+    }
     else
     {
         send_response("error\r\n");
@@ -72,14 +82,77 @@ void UartCmd_Task(void)
 // Nabierz wode do zbiornika
 void UartCmd_OnTake(void)
 {
-    UartCmd_SendReady();
+    // Zbocze 0->1 na MOTOR_CMD
+	HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_RESET);
+	HAL_Delay (10);
+    HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_SET);
+    send_response("Taking water...\r\n");
+
+    // Czekaj na zbocze 0->1 na MOTOR_FB
+    uint32_t start = HAL_GetTick();
+    while (HAL_GPIO_ReadPin(MOTOR_FB_GPIO_Port, MOTOR_FB_Pin) == GPIO_PIN_RESET)
+    {
+        if (HAL_GetTick() - start >= MOTOR_TIMEOUT_MS)
+        {
+            send_response("error\r\n");
+            return;
+        }
+    }
+
+    send_response("ready\r\n");
 }
 
 // Wypusc wode ze zbiornika
 void UartCmd_OnRelease(void)
 {
-    UartCmd_SendReady();
+    // Zbocze 1->0 na MOTOR_CMD
+	HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_SET);
+	HAL_Delay (10);
+    HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_RESET);
+    send_response("Releasing water...\r\n");
+
+    // Czekaj na zbocze 1->0 na MOTOR_FB
+    uint32_t start = HAL_GetTick();
+    while (HAL_GPIO_ReadPin(MOTOR_FB_GPIO_Port, MOTOR_FB_Pin) == GPIO_PIN_SET)
+    {
+        if (HAL_GetTick() - start >= MOTOR_TIMEOUT_MS)
+        {
+            send_response("error\r\n");
+            return;
+        }
+    }
+
+    send_response("ready\r\n");
 }
+
+// reset stma
+void UartCmd_OnReset(void)
+{
+	send_response("Resetting device...\r\n");
+	HAL_Delay(10);
+	NVIC_SystemReset();
+}
+
+// Pomiary on/off
+void UartCmd_OnMeas(void)
+{
+	if (strcmp(cmd_buf, "meas on") == 0)
+	{
+	    meas_enabled = 1;
+	    send_response("Measurements: ON\r\n");
+	}
+	else if (strcmp(cmd_buf, "meas off") == 0)
+	{
+	    meas_enabled = 0;
+	    send_response("Measurements: OFF\r\n");
+	}
+	else
+	{
+	    send_response("error\r\n");
+	}
+}
+
+uint8_t UartCmd_MeasEnabled(void) { return meas_enabled; }
 
 //Callbacks
 void UartCmd_SendReady(void)  { send_response("ready\r\n"); }

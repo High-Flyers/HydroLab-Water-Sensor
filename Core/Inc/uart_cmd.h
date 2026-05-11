@@ -14,5 +14,9 @@ void UartCmd_SendError(void);
 void UartCmd_RxCallback(void);
 void UartCmd_OnTake(void);
 void UartCmd_OnRelease(void);
+void UartCmd_OnReset(void);
+void UartCmd_OnMeas(void);
+
+uint8_t UartCmd_MeasEnabled(void);
 
 #endif
