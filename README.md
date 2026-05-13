@@ -13,7 +13,7 @@ System zapisuje dane kalibracyjne w pamięci Flash, dzięki czemu nie są tracon
 ---
 ## Komunikacja poprzez UART
 
-### Sterowanie silnikiem 
+### Sterowanie poborem wody
 Komendy:
 - `take` - wysłanie polecenia do pobrania próbki wody
 - `release` - wysłanie polecenia do zrzutu pobranej wody
@@ -22,9 +22,9 @@ Po zakończonej operacji żądanej komendą, wysyłana jest informacja zwrotna:
 - `ready` - zakończono pobór / zrzut próbki wody 
 - `error` - nie otrzymano informacji zwrotnej (timeout 5 - 10 s) lub otrzymano błędny sygnał od kontrolera silnika (malformed)
 
-Sterowanie silnikiem odbywa się w sposób:
+Sterowanie elementami wykonawczymi odbywa się w sposób:
 - `take` - MOTOR_CMD LOW->HIGH, oczekiwanie na MOTOR_FB = HIGH
-- `release` - MOTOR_CMD HIGH->LOW, oczekiwanie na MOTOR_FB = LOW
+- `release` - obrót serwomechanizmu o 90°, odczekanie 5 s
 
 ### Ramka UART z pomiarami
 Przykładowa ramka wysyłana co 1 sekundę:  
@@ -92,6 +92,7 @@ Dane kalibracyjne są zapisane na pamięć flash, aby zachować je po restarcie 
 | PA10   | USART1_RX   | UART – odbiór              |
 | PB0   | MOTOR_FB   | Sygnał zwrotny z kontrolera silnika       |
 | PB1   | MOTOR_CMD   | Komenda do kontrolera silnika         |
+| PA7   | TIM3_CH2   | Wyjście PWM dla serwomechanizmu       |
 
 ---
 
@@ -103,6 +104,7 @@ Dane kalibracyjne są zapisane na pamięć flash, aby zachować je po restarcie 
 5. Przycisk pH → PB13 do GND  
 6. UART → PA9 (TX), PA10 (RX)
 7. MOTOR_FB → PB0, MOTOR_CMD → PB1
+8. Serwomechanizm → PA7
 ---
 
 ## Uwagi dotyczące sondy pH 

@@ -3,7 +3,7 @@
 
 #include "main.h"
 
-void UartCmd_Init(UART_HandleTypeDef *huart);
+void UartCmd_Init(UART_HandleTypeDef *huart, TIM_HandleTypeDef *htim);
 void UartCmd_Task(void);
 
 // Komendy

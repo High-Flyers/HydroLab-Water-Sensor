@@ -5,6 +5,8 @@
 #define MOTOR_TIMEOUT_MS 10000
 
 static UART_HandleTypeDef *_huart;
+TIM_HandleTypeDef *_htim;
+
 static uint8_t rx_byte;
 static char rx_buf[RX_BUF_SIZE];
 static uint8_t rx_idx = 0;
@@ -12,9 +14,11 @@ static uint8_t cmd_ready = 0;
 static char cmd_buf[RX_BUF_SIZE];
 static uint8_t meas_enabled = 1;
 
-void UartCmd_Init(UART_HandleTypeDef *huart)
+void UartCmd_Init(UART_HandleTypeDef *huart, TIM_HandleTypeDef *htim)
 {
+	// Przypisz instancje
     _huart = huart;
+    _htim = htim;
     // Uruchom odbiór bajt po bajcie przez przerwanie
     HAL_UART_Receive_IT(_huart, &rx_byte, 1);
 }
@@ -105,22 +109,9 @@ void UartCmd_OnTake(void)
 // Wypusc wode ze zbiornika
 void UartCmd_OnRelease(void)
 {
-    // Zbocze 1->0 na MOTOR_CMD
-	HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_SET);
-	HAL_Delay (10);
-    HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_RESET);
-    send_response("Releasing water...\r\n");
-
-    // Czekaj na zbocze 1->0 na MOTOR_FB
-    uint32_t start = HAL_GetTick();
-    while (HAL_GPIO_ReadPin(MOTOR_FB_GPIO_Port, MOTOR_FB_Pin) == GPIO_PIN_SET)
-    {
-        if (HAL_GetTick() - start >= MOTOR_TIMEOUT_MS)
-        {
-            send_response("error\r\n");
-            return;
-        }
-    }
+	__HAL_TIM_SET_COMPARE(_htim, TIM_CHANNEL_2, 2000);
+	HAL_Delay(5000);
+	__HAL_TIM_SET_COMPARE(_htim, TIM_CHANNEL_2, 1000);
 
     send_response("ready\r\n");
 }
