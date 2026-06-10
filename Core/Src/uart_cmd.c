@@ -2,7 +2,9 @@
 #include <string.h>
 
 #define RX_BUF_SIZE 32
-#define MOTOR_TIMEOUT_MS 10000
+#define MOTOR_TIMEOUT_MS 40000
+
+#define RELEASE_TIMEOUT_MS 20000
 
 static UART_HandleTypeDef *_huart;
 TIM_HandleTypeDef *_htim;
@@ -88,7 +90,7 @@ void UartCmd_OnTake(void)
 {
     // Zbocze 0->1 na MOTOR_CMD
 	HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_RESET);
-	HAL_Delay (10);
+	HAL_Delay (100);
     HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_SET);
     send_response("Taking water...\r\n");
 
@@ -109,9 +111,26 @@ void UartCmd_OnTake(void)
 // Wypusc wode ze zbiornika
 void UartCmd_OnRelease(void)
 {
-	__HAL_TIM_SET_COMPARE(_htim, TIM_CHANNEL_2, 2000);
-	HAL_Delay(5000);
+	// Otworz servo
 	__HAL_TIM_SET_COMPARE(_htim, TIM_CHANNEL_2, 1000);
+
+	// Zbocze 1->0 na MOTOR_CMD
+	HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_SET);
+	HAL_Delay (100);
+	HAL_GPIO_WritePin(MOTOR_CMD_GPIO_Port, MOTOR_CMD_Pin, GPIO_PIN_RESET);
+
+	// Czekaj na zbocze 1->0 na MOTOR_FB
+	uint32_t start = HAL_GetTick();
+	while (HAL_GPIO_ReadPin(MOTOR_FB_GPIO_Port, MOTOR_FB_Pin) == GPIO_PIN_SET)
+	{
+	     if (HAL_GetTick() - start >= RELEASE_TIMEOUT_MS)
+	     {
+	         send_response("error\r\n");
+	         return;
+	     }
+	 }
+
+	__HAL_TIM_SET_COMPARE(_htim, TIM_CHANNEL_2, 2000);
 
     send_response("ready\r\n");
 }

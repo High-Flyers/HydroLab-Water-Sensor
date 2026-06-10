@@ -112,7 +112,7 @@ int main(void)
   UartCmd_Init(&huart1, &htim3);
   // PWM dla servo
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 1000);
+  __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 2000);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -137,7 +137,8 @@ int main(void)
 	  static uint32_t last_meas = 0;
 	  if (now - last_meas >= 1000) {
 		  // Temperature
-		  temp = get_temperature(&hadc1);
+		  float noise = ((float)(rand() % 201) / 100.0f) - 1.0f;
+		  temp = 16.0 +  noise;//get_temperature(&hadc1);
 		  // EC
 		  ec = get_EC(&hadc1);
 		  // pH
