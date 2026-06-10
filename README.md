@@ -97,6 +97,9 @@ Dane kalibracyjne są zapisane na pamięć flash, aby zachować je po restarcie 
 ---
 
 ## Podłączenie
+
+<img src="connections.jpg" alt="Schemat połączeń układu" width="700">
+
 1. Czujnik temperatury → PA0  
 2. Czujnik EC → PA1  
 3. Czujnik pH → PA2  
